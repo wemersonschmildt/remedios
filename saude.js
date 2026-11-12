@@ -38,9 +38,13 @@ async function htmlSaude() {
   const futuras = consultas.filter((c) => !passadas.includes(c));
 
   let html = '';
+  for (const c of p.condicoes_especiais || []) {
+    if (RESTRICOES[c]) html += `<div class="alerta-alergia item-clicavel" data-restricao="${c}" style="background:var(--laranja-suave);color:var(--laranja)"><b>🧬 ${esc(RESTRICOES[c].nome)}</b>O app avisa ao registrar remédios restritos. Toque para ver a lista.</div>`;
+  }
   if (p.alergias) html += `<div class="alerta-alergia"><b>⚠️ Alergias</b>${esc(p.alergias)}</div>`;
 
   const resumo = [
+    ...(p.condicoes_especiais || []).map((c) => RESTRICOES[c]?.curto).filter(Boolean),
     p.nascimento && rlIdade(p.nascimento),
     p.tipo_sanguineo && `Sangue ${p.tipo_sanguineo}`,
     p.peso_kg && `${fmtNum(p.peso_kg)} kg`,
@@ -108,6 +112,7 @@ async function htmlSaude() {
 function ligarSaude() {
   const p = pessoaAtual();
   $('#s-ficha').onclick = () => modalFicha(p);
+  $$('[data-restricao]').forEach((el) => el.onclick = () => modalRestricoes(el.dataset.restricao));
   $('#s-agendar').onclick = () => modalConsulta(null);
   $('#s-atend').onclick = () => modalAtendimento(null);
   $('#s-vacinas').onclick = () => modalVacinas();
@@ -143,6 +148,8 @@ function modalFicha(p) {
       ${campo('f-peso', 'Peso (kg)', p.peso_kg, 'number', 'step="0.1" inputmode="decimal"')}
       ${campo('f-alt', 'Altura (cm)', p.altura_cm, 'number', 'step="0.5" inputmode="decimal"')}
     </div>
+    <div class="secao-titulo" style="margin-top:0">Condições que restringem remédios</div>
+    ${Object.entries(RESTRICOES).map(([k, d]) => `<label class="check"><input type="checkbox" class="f-cond-esp" value="${k}" ${(p.condicoes_especiais || []).includes(k) ? 'checked' : ''}> <span>${esc(d.nome)} <a href="#" data-ver-rest="${k}">ver lista</a></span></label>`).join('')}
     ${area('f-alergias', '⚠️ Alergias', p.alergias, 'ex.: dipirona, amendoim, picada de abelha')}
     ${area('f-cond', 'Condições de saúde / doenças', p.condicoes, 'ex.: asma, refluxo, cirurgias anteriores')}
     ${area('f-cont', 'Remédios de uso contínuo', p.uso_continuo)}
@@ -153,6 +160,7 @@ function modalFicha(p) {
     ${area('f-med', 'Médicos de confiança (nome, especialidade, telefone)', p.medicos_confianca)}
     ${area('f-obs', 'Outras observações', p.observacoes_saude)}
     <button class="btn primario bloco" id="f-ok">Salvar</button>`, (f) => {
+    $$('[data-ver-rest]', f).forEach((a) => a.onclick = (e) => { e.preventDefault(); modalRestricoes(a.dataset.verRest); });
     $('#f-ok', f).onclick = async () => {
       const v = (id) => $(id, f).value.trim() || null;
       const n = (id) => { const x = parseFloat(String($(id, f).value).replace(',', '.')); return isNaN(x) ? null : x; };
@@ -160,6 +168,7 @@ function modalFicha(p) {
         await q(sb.from('pessoas').update({
           nascimento: v('#f-nasc'), tipo_sanguineo: v('#f-sangue'), peso_kg: n('#f-peso'), altura_cm: n('#f-alt'),
           alergias: v('#f-alergias'), condicoes: v('#f-cond'), uso_continuo: v('#f-cont'),
+          condicoes_especiais: $$('.f-cond-esp', f).filter((x) => x.checked).map((x) => x.value),
           plano_saude: v('#f-plano'), plano_carteirinha: v('#f-cart'), medicos_confianca: v('#f-med'), observacoes_saude: v('#f-obs'),
         }).eq('id', p.id));
         await recarregarCadastros();

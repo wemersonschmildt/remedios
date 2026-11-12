@@ -1,6 +1,6 @@
 // Service worker: recebe as notificações e guarda os arquivos do app para abrir rápido
-const CACHE = 'remedios-v5';
-const ARQUIVOS = ['./', './index.html', './estilo.css', './app.js', './remedios-base.js', './relatorio-comum.js', './saude.js', './manifest.json', './icones/icone-192.png'];
+const CACHE = 'remedios-v6';
+const ARQUIVOS = ['./', './index.html', './estilo.css', './app.js', './remedios-base.js', './relatorio-comum.js', './saude.js', './restricoes.js', './manifest.json', './icones/icone-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));

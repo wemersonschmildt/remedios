@@ -198,3 +198,5 @@ pre.previa { white-space: pre-wrap; font-size: 13px; background: var(--cartao); 
 .anexo-pdf { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 36px; background: var(--fundo); border-radius: 8px; }
 .anexo-nome { font-size: 11px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
 .hora-chip.atend { background: var(--verde-suave); color: var(--verde); }
+.tag-rest { display: inline-block; background: var(--fundo); border-radius: 8px; padding: 3px 8px; margin: 2px 0; font-size: 14px; }
+.sugestao .etiqueta { font-size: 11px; padding: 2px 6px; }

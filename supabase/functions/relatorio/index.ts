@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     const ate = c.ate ? sql`((${c.ate}::date + 1))::timestamp at time zone ${tz}` : sql`'infinity'::timestamptz`
 
     const [pessoa] = await sql`
-      select nome, nascimento, peso_kg, altura_cm, tipo_sanguineo, alergias, condicoes, uso_continuo,
+      select nome, condicoes_especiais, nascimento, peso_kg, altura_cm, tipo_sanguineo, alergias, condicoes, uso_continuo,
              plano_saude, plano_carteirinha, medicos_confianca, observacoes_saude
         from public.pessoas where id = ${c.pessoa_id}`
     const atendimentos = await sql`

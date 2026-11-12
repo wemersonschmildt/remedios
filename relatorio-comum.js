@@ -32,6 +32,7 @@ function montarSecoesRelatorio(d) {
   // Identificação
   const ident = [
     ['Nome', p.nome],
+    ['Condições especiais', (p.condicoes_especiais || []).map((c) => (typeof RESTRICOES !== 'undefined' && RESTRICOES[c]?.nome) || c).join(', ')],
     ['Idade', p.nascimento ? `${rlIdade(p.nascimento)} (nasc. ${rlDataSimples(p.nascimento)})` : ''],
     ['Peso', p.peso_kg ? `${rlNum(p.peso_kg)} kg` : ''],
     ['Altura', p.altura_cm ? `${rlNum(p.altura_cm)} cm` : ''],
@@ -39,6 +40,19 @@ function montarSecoesRelatorio(d) {
     ['Plano de saúde', [p.plano_saude, p.plano_carteirinha ? `carteirinha ${p.plano_carteirinha}` : ''].filter(Boolean).join(' — ')],
   ].filter(([, v]) => v);
   secoes.push({ titulo: 'Identificação', blocos: [{ pares: ident }] });
+
+  // Condições que restringem remédios (ex.: G6PD)
+  for (const c of p.condicoes_especiais || []) {
+    const def = typeof RESTRICOES !== 'undefined' ? RESTRICOES[c] : null;
+    secoes.push({
+      titulo: def ? def.nome : c,
+      destaque: true,
+      blocos: def ? [
+        { texto: 'Paciente com ' + def.nome + '. Verificar a lista antes de prescrever.' },
+        { pares: [['Evitar', def.evitar.join(', ')], ['Usar com cautela', def.cautela.join(', ')], ['Outros cuidados', def.outros]] },
+      ] : [{ texto: c }],
+    });
+  }
 
   secoes.push({
     titulo: 'Alergias',

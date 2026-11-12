@@ -202,10 +202,14 @@ function montarAutoRemedio(container, aoEscolher) {
   const atualizar = () => {
     const lista = buscarRemedios(input.value);
     if (!lista.length || lista.some((r) => norm(r.nome) === norm(input.value))) { caixa.hidden = true; return; }
-    caixa.innerHTML = lista.map((r, i) => `
-      <div class="sugestao" data-i="${i}">${esc(r.nome)}
+    const pes = pessoaAtual();
+    caixa.innerHTML = lista.map((r, i) => {
+      const rest = restricaoRemedio(pes, r.nome);
+      const selo = rest ? ` <span class="etiqueta ${rest.nivel === 'evitar' ? 'atrasada' : 'agora'}">${rest.nivel === 'evitar' ? '⛔ evitar' : '⚠️ cautela'} · ${esc(rest.condicao.curto)}</span>` : '';
+      return `
+      <div class="sugestao" data-i="${i}">${esc(r.nome)}${selo}
         <small>${esc([r.principios.join(' + '), r.classes.join(' · ')].filter(Boolean).join(' — ') || 'cadastrado pela família')}</small>
-      </div>`).join('');
+      </div>`; }).join('');
     caixa.hidden = false;
     $$('.sugestao', caixa).forEach((el) => el.onpointerdown = (e) => {
       e.preventDefault();
@@ -276,6 +280,8 @@ async function verificarAlertas(pessoaId, nome, quandoIso) {
     .lte('tomado_em', new Date(quando).toISOString())
     .order('tomado_em', { ascending: false }));
   const avisos = [];
+  const restricao = mensagemRestricao(S.pessoas.find((x) => x.id === pessoaId), nome);
+  if (restricao) avisos.push(restricao);
   const alergia = alergiaConflito(pessoaId, nome);
   if (alergia) avisos.push(alergia);
   const vistos = new Set();
@@ -601,8 +607,8 @@ async function darSos(id, quando = new Date().toISOString(), confirmarAntes = tr
     const tomadas = await q(sb.from('doses').select('remedio, tomado_em').eq('pessoa_id', t.pessoa_id).eq('status', 'tomada')
       .gte('tomado_em', new Date(new Date(quando) - Math.max(24, t.intervalo_horas) * HORA).toISOString()));
     const st = situacaoSos(t, tomadas, new Date(quando).getTime() + 1);
-    const alergia = alergiaConflito(t.pessoa_id, t.remedio);
-    if (alergia && !(await confirmar('Atenção', `<div class="aviso" style="margin-top:0">${alergia}</div>`, 'Registrar mesmo assim'))) return;
+    const alertas = [mensagemRestricao(S.pessoas.find((x) => x.id === t.pessoa_id), t.remedio), alergiaConflito(t.pessoa_id, t.remedio)].filter(Boolean);
+    if (alertas.length && !(await confirmar('Atenção', `<div class="aviso" style="margin-top:0">${alertas.join('<br><br>')}</div>`, 'Registrar mesmo assim'))) return;
     if (confirmarAntes && !st.liberado) {
       const motivo = st.limite
         ? `Já foram ${st.em24h} dose(s) nas últimas 24h (máximo ${t.max_doses_dia}).`
@@ -1280,8 +1286,8 @@ function modalTratamento(nomeInicial = '', tipoInicial = 'agendado') {
         if (!(await garantirRemedio(nome))) return;
         const nomeFinal = acharRemedio(nome)?.nome || nome;
         if (tipo === 'sos') {
-          const alergia = alergiaConflito(p.id, nomeFinal);
-          if (alergia && !(await confirmar('Atenção', `<div class="aviso" style="margin-top:0">${alergia}</div>`, 'Cadastrar mesmo assim'))) return;
+          const alertas = [mensagemRestricao(p, nomeFinal), alergiaConflito(p.id, nomeFinal)].filter(Boolean);
+          if (alertas.length && !(await confirmar('Atenção', `<div class="aviso" style="margin-top:0">${alertas.join('<br><br>')}</div>`, 'Cadastrar mesmo assim'))) return;
           await q(sb.from('tratamentos').insert({
             familia_id: S.familia.id, pessoa_id: p.id, remedio: nomeFinal, dose: dados.dose,
             intervalo_horas: int, dias: null, inicio: new Date().toISOString(), tipo: 'sos',
