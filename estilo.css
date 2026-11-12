@@ -179,3 +179,9 @@ textarea { min-height: 90px; resize: vertical; }
 .progresso { height: 6px; background: var(--borda); border-radius: 3px; overflow: hidden; margin-top: 8px; }
 .progresso > div { height: 100%; background: var(--verde); }
 pre.previa { white-space: pre-wrap; font-size: 13px; background: var(--cartao); padding: 10px; border-radius: 10px; max-height: 200px; overflow: auto; }
+
+/* Seletor de tipo */
+.segmento { display: grid; grid-template-columns: 1fr 1fr; background: var(--borda); border-radius: 12px; padding: 3px; margin-bottom: 12px; }
+.segmento button { border: 0; background: none; padding: 9px; border-radius: 10px; font-weight: 600; color: var(--suave); }
+.segmento button.ativo { background: var(--cartao); color: var(--texto); box-shadow: var(--sombra); }
+[hidden] { display: none !important; }

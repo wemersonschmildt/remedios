@@ -257,9 +257,12 @@ async function garantirRemedio(nome) {
 async function verificarAlertas(pessoaId, nome, quandoIso) {
   const quando = new Date(quandoIso).getTime();
   const r = acharRemedio(nome);
+  // Se for um remédio "se necessário", vale o intervalo cadastrado
+  const sosT = (S.sosAtivos || []).find((t) => t.pessoa_id === pessoaId && mesmoRemedio(t.remedio, nome));
+  const limiteMesmo = sosT ? +sosT.intervalo_horas : 6;
   const doses = await q(sb.from('doses').select('remedio, tomado_em')
     .eq('pessoa_id', pessoaId).eq('status', 'tomada')
-    .gte('tomado_em', new Date(quando - 8 * HORA).toISOString())
+    .gte('tomado_em', new Date(quando - Math.max(8, limiteMesmo) * HORA).toISOString())
     .lte('tomado_em', new Date(quando).toISOString())
     .order('tomado_em', { ascending: false }));
   const avisos = [];
@@ -270,11 +273,11 @@ async function verificarAlertas(pessoaId, nome, quandoIso) {
     const mesmo = norm(d.remedio) === norm(nome);
     const comuns = r && o ? r.principios.filter((p) => o.principios.includes(p)) : [];
     let msg = null;
-    if ((mesmo || comuns.length) && horas < 6) {
+    if ((mesmo || comuns.length) && horas < limiteMesmo) {
       msg = mesmo
         ? `<b>${esc(d.remedio)}</b> já foi dado às ${hora(d.tomado_em)} (${duracao(horas * 60)} antes).`
         : `Mesmo princípio ativo (${esc(comuns.join(', '))}): <b>${esc(d.remedio)}</b> foi dado às ${hora(d.tomado_em)} (${duracao(horas * 60)} antes).`;
-    } else if (r && o && !mesmo && r.classes.includes(CLASSES.AINE) && o.classes.includes(CLASSES.AINE)) {
+    } else if (r && o && !mesmo && !comuns.length && horas < 8 && r.classes.includes(CLASSES.AINE) && o.classes.includes(CLASSES.AINE)) {
       msg = `<b>${esc(d.remedio)}</b> também é anti-inflamatório e foi dado às ${hora(d.tomado_em)} (${duracao(horas * 60)} antes).`;
     }
     if (msg && !vistos.has(norm(d.remedio))) { vistos.add(norm(d.remedio)); avisos.push(msg); }
@@ -447,15 +450,17 @@ let cacheHoje = {};
 async function htmlHoje() {
   const p = pessoaAtual();
   const agora = Date.now();
-  const [pendentes, tomadas, eventos] = await Promise.all([
+  const [pendentes, tomadas, eventos, sos] = await Promise.all([
     q(sb.from('doses').select('*').eq('pessoa_id', p.id).eq('status', 'pendente')
       .lte('previsto_em', new Date(agora + 24 * HORA).toISOString()).order('previsto_em')),
     q(sb.from('doses').select('remedio, dose, tomado_em').eq('pessoa_id', p.id).eq('status', 'tomada')
       .gte('tomado_em', new Date(agora - 72 * HORA).toISOString()).order('tomado_em', { ascending: false })),
     q(sb.from('eventos').select('*').eq('pessoa_id', p.id)
       .gte('ocorrido_em', new Date(agora - 24 * HORA).toISOString()).order('ocorrido_em', { ascending: false })),
+    q(sb.from('tratamentos').select('*').eq('pessoa_id', p.id).eq('tipo', 'sos').eq('ativo', true).order('remedio')),
   ]);
-  cacheHoje = { pendentes };
+  cacheHoje = { pendentes, sos };
+  S.sosAtivos = sos;
 
   const limite = agora + 10 * 60e3;
   const paraAgora = pendentes.filter((d) => new Date(d.previsto_em) <= limite);
@@ -477,6 +482,27 @@ async function htmlHoje() {
           <button class="btn verde" data-tomei="${d.id}">✓ Tomei</button>
           <button class="btn neutro" data-outro="${d.id}">Outro horário</button>
           <button class="btn perigo" data-pular="${d.id}" style="flex:.6">Pular</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  if (sos.length) {
+    html += `<div class="secao-titulo">Se necessário</div>`;
+    html += sos.map((t) => {
+      const st = situacaoSos(t, tomadas);
+      return `<div class="cartao dose">
+        <div class="dose-topo">
+          <div><div class="dose-nome">${esc(t.remedio)}</div>
+          <div class="dose-info">${t.dose ? esc(t.dose) + ' · ' : ''}intervalo mínimo ${fmtNum(t.intervalo_horas)}h${t.max_doses_dia ? ` · máx. ${t.max_doses_dia} em 24h` : ''}</div>
+          <div class="dose-info">${st.ultima ? `Última: ${diaMes(st.ultima)} às ${hora(st.ultima)} (${haQuanto(st.ultima)})` : 'Nenhuma dose recente'}${t.max_doses_dia ? ` · ${st.em24h} de ${t.max_doses_dia} em 24h` : ''}</div>
+          ${t.observacao ? `<div class="dose-info">📝 ${esc(t.observacao)}</div>` : ''}</div>
+          <span class="etiqueta ${st.liberado ? 'ok' : 'futura'}">${st.liberado ? 'Liberado' : st.limite ? 'Limite atingido' : 'Libera ' + hora(st.liberaEm)}</span>
+        </div>
+        ${!st.liberado && st.liberaEm ? `<div class="dose-info">Pode dar de novo ${emQuanto(st.liberaEm)}, às ${hora(st.liberaEm)}${chaveDia(st.liberaEm) !== chaveDia(new Date()) ? ' de ' + diaMes(st.liberaEm) : ''}.</div>` : ''}
+        <div class="botoes">
+          <button class="btn ${st.liberado ? 'verde' : 'neutro'}" data-sos="${t.id}">💊 Dar agora</button>
+          <button class="btn neutro" data-sos-outro="${t.id}">Outro horário</button>
         </div>
       </div>`;
     }).join('');
@@ -523,6 +549,52 @@ async function htmlHoje() {
   return html;
 }
 
+// Dose do mesmo remédio ou com o mesmo princípio ativo
+function mesmoRemedio(a, b) {
+  if (norm(a) === norm(b)) return true;
+  const ra = acharRemedio(a), rb = acharRemedio(b);
+  return !!(ra && rb && ra.principios.some((p) => rb.principios.includes(p)));
+}
+
+// Situação de um remédio "se necessário": liberado ou quando libera
+function situacaoSos(t, tomadas, agora = Date.now()) {
+  const doses = tomadas.filter((d) => mesmoRemedio(d.remedio, t.remedio)).map((d) => new Date(d.tomado_em).getTime()).filter((x) => x <= agora).sort((a, b) => b - a);
+  const ultima = doses[0] || null;
+  let liberaEm = ultima ? ultima + t.intervalo_horas * HORA : null;
+  const em24 = doses.filter((x) => x > agora - 24 * HORA);
+  let limite = false;
+  if (t.max_doses_dia && em24.length >= t.max_doses_dia) {
+    limite = true;
+    // libera quando a dose mais antiga dentro das 24h sair da janela
+    const saida = em24[t.max_doses_dia - 1] + 24 * HORA;
+    liberaEm = Math.max(liberaEm || 0, saida);
+  }
+  const liberado = !liberaEm || liberaEm <= agora;
+  return { ultima: ultima && new Date(ultima), liberaEm: liberaEm && new Date(liberaEm), liberado, limite: limite && !liberado, em24h: em24.length };
+}
+
+async function darSos(id, quando = new Date().toISOString(), confirmarAntes = true) {
+  const t = (cacheHoje.sos || []).find((x) => x.id === id);
+  if (!t) return;
+  try {
+    const tomadas = await q(sb.from('doses').select('remedio, tomado_em').eq('pessoa_id', t.pessoa_id).eq('status', 'tomada')
+      .gte('tomado_em', new Date(new Date(quando) - Math.max(24, t.intervalo_horas) * HORA).toISOString()));
+    const st = situacaoSos(t, tomadas, new Date(quando).getTime() + 1);
+    if (confirmarAntes && !st.liberado) {
+      const motivo = st.limite
+        ? `Já foram ${st.em24h} dose(s) nas últimas 24h (máximo ${t.max_doses_dia}).`
+        : `A última dose foi às ${hora(st.ultima)}. O intervalo mínimo de ${fmtNum(t.intervalo_horas)}h só completa às ${hora(st.liberaEm)}.`;
+      if (!(await confirmar('Ainda não liberado', `<div class="aviso" style="margin-top:0">${motivo}</div><p class="dica" style="margin:0">Registre só se o médico orientou.</p>`, 'Registrar mesmo assim'))) return;
+    }
+    await q(sb.from('doses').insert({
+      familia_id: t.familia_id, pessoa_id: t.pessoa_id, remedio: t.remedio, dose: t.dose,
+      status: 'tomada', tomado_em: quando, registrado_por: S.usuario.id,
+    }));
+    toast(`💊 ${t.remedio} registrado às ${hora(quando)}`);
+    render();
+  } catch (e) { erro(e); }
+}
+
 function avisoInstalacao() {
   const instalado = window.navigator.standalone || matchMedia('(display-mode: standalone)').matches;
   if (!instalado && /iPhone|iPad/.test(navigator.userAgent)) {
@@ -541,6 +613,16 @@ function ligarHoje() {
   });
   $$('[data-outro]').forEach((b) => b.onclick = () => abrirDose(b.dataset.outro));
   $('#btn-avulso').onclick = () => modalAvulso();
+  $$('[data-sos]').forEach((b) => b.onclick = () => darSos(b.dataset.sos));
+  $$('[data-sos-outro]').forEach((b) => b.onclick = () => {
+    const t = cacheHoje.sos.find((x) => x.id === b.dataset.sosOutro);
+    abrirModal(`
+      <h2>${esc(t.remedio)}</h2>
+      <label class="campo"><span>Horário em que deu</span><input type="datetime-local" id="so-quando" value="${paraInput(new Date())}"></label>
+      <button class="btn verde bloco" id="so-ok">Registrar</button>`, (f) => {
+      $('#so-ok', f).onclick = () => { const v = deInput($('#so-quando', f).value); fecharModal(); darSos(t.id, v); };
+    });
+  });
   $$('[data-evento]').forEach((b) => b.onclick = () => registrarEvento(TIPOS_EVENTO[+b.dataset.evento]));
   $('#ativar-notif')?.addEventListener('click', ativarNotificacoes);
 }
@@ -587,7 +669,7 @@ function modalAvulso(nomeInicial = '') {
     <label class="campo"><span>Dose (opcional)</span><input type="text" id="a-dose" placeholder="ex.: 5 ml, 1 comprimido, 20 gotas"></label>
     <label class="campo"><span>Horário</span><input type="datetime-local" id="a-quando" value="${paraInput(new Date())}"></label>
     <button class="btn verde bloco" id="a-ok">Registrar</button>
-    <button class="link" id="a-trat">Criar tratamento com lembretes</button>`, (f) => {
+    <button class="link" id="a-trat">Cadastrar como tratamento (horário fixo ou se necessário)</button>`, (f) => {
     montarAutoRemedio($('#a-auto', f));
     if (!nomeInicial) setTimeout(() => $('#a-nome', f).focus(), 250);
     $('#a-trat', f).onclick = () => modalTratamento($('#a-nome', f).value);
@@ -936,10 +1018,14 @@ async function htmlTratamentos() {
     const ultima = ds.filter((d) => d.status !== 'cancelada').at(-1);
     return { tomadas, total, proxima, ultima, emAndamento: t.ativo && !!proxima };
   };
-  const ativos = trats.filter((t) => info(t).emAndamento);
-  const outros = trats.filter((t) => !info(t).emAndamento);
+  const sos = trats.filter((t) => t.tipo === 'sos' && t.ativo);
+  const ativos = trats.filter((t) => t.tipo !== 'sos' && info(t).emAndamento);
+  const outros = trats.filter((t) => t.tipo === 'sos' ? !t.ativo : !info(t).emAndamento);
 
-  let html = `<button class="btn primario bloco" id="t-novo" style="margin:6px 0 4px">+ Novo tratamento</button>`;
+  let html = `<div class="botoes" style="margin:6px 0 4px">
+    <button class="btn primario" id="t-novo">⏰ Horário fixo</button>
+    <button class="btn" id="t-sos">🆘 Se necessário</button>
+  </div>`;
   html += `<div class="secao-titulo">Em andamento</div>`;
   if (!ativos.length) html += `<div class="vazio">Nenhum tratamento em andamento para ${esc(p.nome)}.</div>`;
   for (const t of ativos) {
@@ -959,9 +1045,23 @@ async function htmlTratamentos() {
       </div>
     </div>`;
   }
+  html += `<div class="secao-titulo">Se necessário (dor, febre, enjoo…)</div>`;
+  if (!sos.length) html += `<div class="vazio" style="padding:8px">Nenhum. Use para remédios dados só quando precisa, respeitando um intervalo mínimo.</div>`;
+  for (const t of sos) {
+    html += `<div class="cartao">
+      <div class="dose-nome">${esc(t.remedio)}</div>
+      <div class="dose-info">${t.dose ? esc(t.dose) + ' · ' : ''}intervalo mínimo ${fmtNum(t.intervalo_horas)}h${t.max_doses_dia ? ` · máx. ${t.max_doses_dia} em 24h` : ''}</div>
+      ${t.observacao ? `<div class="dose-info">📝 ${esc(t.observacao)}</div>` : ''}
+      <div class="botoes" style="margin-top:10px">
+        <button class="btn pequeno perigo" data-encerrar="${t.id}">Encerrar</button>
+      </div>
+    </div>`;
+  }
   if (outros.length) {
     html += `<div class="secao-titulo">Encerrados</div><div class="lista">`;
-    html += outros.map((t) => { const i = info(t); return `<div class="item item-clicavel" data-doses="${t.id}">
+    html += outros.map((t) => { const i = info(t); return t.tipo === 'sos'
+      ? `<div class="item"><div><div>${esc(t.remedio)}</div><div class="sub">se necessário · intervalo ${fmtNum(t.intervalo_horas)}h</div></div></div>`
+      : `<div class="item item-clicavel" data-doses="${t.id}">
       <div><div>${esc(t.remedio)}</div><div class="sub">${diaMes(t.inicio)} · a cada ${fmtNum(t.intervalo_horas)}h · ${i.tomadas}/${i.total} doses</div></div>
       <span class="sub">›</span></div>`; }).join('');
     html += `</div>`;
@@ -972,8 +1072,11 @@ const fmtNum = (n) => String(+n).replace('.', ',');
 
 function ligarTratamentos() {
   $('#t-novo').onclick = () => modalTratamento();
+  $('#t-sos').onclick = () => modalTratamento('', 'sos');
   $$('[data-encerrar]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmar('Encerrar tratamento?', 'As doses que ainda faltam serão canceladas e os lembretes param.', 'Encerrar', true))) return;
+    const t = cacheTrat.find((x) => x.id === b.dataset.encerrar);
+    const msg = t?.tipo === 'sos' ? `${esc(t.remedio)} sai da lista "Se necessário". O histórico fica guardado.` : 'As doses que ainda faltam serão canceladas e os lembretes param.';
+    if (!(await confirmar('Encerrar?', msg, 'Encerrar', true))) return;
     try { await q(sb.rpc('encerrar_tratamento', { p_tratamento: b.dataset.encerrar })); render(); } catch (e) { erro(e); }
   });
   $$('[data-doses]').forEach((b) => b.onclick = () => modalDosesTratamento(b.dataset.doses));
@@ -997,27 +1100,41 @@ async function modalDosesTratamento(id) {
   });
 }
 
-function modalTratamento(nomeInicial = '') {
+function modalTratamento(nomeInicial = '', tipoInicial = 'agendado') {
   const p = pessoaAtual();
   const inicio = new Date();
   inicio.setSeconds(0, 0);
   abrirModal(`
-    <h2>Novo tratamento — ${esc(p.nome)}</h2>
+    <h2>Novo remédio — ${esc(p.nome)}</h2>
+    <div class="segmento" id="n-tipo">
+      <button data-tipo="agendado">⏰ Horário fixo</button>
+      <button data-tipo="sos">🆘 Se necessário</button>
+    </div>
+    <p class="dica" id="n-explica"></p>
     <label class="campo"><span>Remédio</span><div class="auto" id="n-auto"><input type="text" id="n-nome" value="${esc(nomeInicial)}" placeholder="Digite para buscar" autocomplete="off"></div></label>
     <label class="campo"><span>Dose</span><input type="text" id="n-dose" placeholder="ex.: 5 ml, 1 comprimido"></label>
     <div class="linha-campos">
-      <label class="campo"><span>A cada (horas)</span><input type="number" id="n-int" value="8" min="0.5" step="0.5" inputmode="decimal"></label>
-      <label class="campo"><span>Por (dias)</span><input type="number" id="n-dias" value="7" min="0.5" step="0.5" inputmode="decimal"></label>
+      <label class="campo"><span id="n-int-rot">A cada (horas)</span><input type="number" id="n-int" value="8" min="0.5" step="0.5" inputmode="decimal"></label>
+      <label class="campo so-agendado"><span>Por (dias)</span><input type="number" id="n-dias" value="7" min="0.5" step="0.5" inputmode="decimal"></label>
+      <label class="campo so-sos"><span>Máx. em 24h (opcional)</span><input type="number" id="n-max" min="1" step="1" inputmode="numeric" placeholder="—"></label>
     </div>
-    <label class="campo"><span>Primeira dose</span><input type="datetime-local" id="n-inicio" value="${paraInput(inicio)}"></label>
-    <label class="check"><input type="checkbox" id="n-ja"> <span>A primeira dose já foi dada nesse horário</span></label>
-    <label class="check"><input type="checkbox" id="n-recalc" checked> <span>Se uma dose atrasar, recalcular as próximas a partir do horário em que foi dada</span></label>
-    <label class="campo"><span>Observação (opcional)</span><input type="text" id="n-obs" placeholder="ex.: dar depois de comer"></label>
+    <div class="so-agendado">
+      <label class="campo"><span>Primeira dose</span><input type="datetime-local" id="n-inicio" value="${paraInput(inicio)}"></label>
+      <label class="check"><input type="checkbox" id="n-ja"> <span>A primeira dose já foi dada nesse horário</span></label>
+      <label class="check"><input type="checkbox" id="n-recalc" checked> <span>Se uma dose atrasar, recalcular as próximas a partir do horário em que foi dada</span></label>
+    </div>
+    <label class="campo"><span>Observação (opcional)</span><input type="text" id="n-obs" placeholder="ex.: só se febre acima de 37,8°C"></label>
     <p class="dica" id="n-previa"></p>
-    <button class="btn primario bloco" id="n-ok">Criar e ativar lembretes</button>`, (f) => {
+    <button class="btn primario bloco" id="n-ok"></button>`, (f) => {
+    let tipo = tipoInicial;
     montarAutoRemedio($('#n-auto', f));
     const previa = () => {
       const int = parseFloat($('#n-int', f).value.replace(',', '.'));
+      if (tipo === 'sos') {
+        const max = parseInt($('#n-max', f).value, 10);
+        $('#n-previa', f).textContent = int > 0 ? `Sem lembretes. O app mostra quando está liberado: ${fmtNum(int)}h depois da última dose${max > 0 ? `, no máximo ${max} vez(es) em 24h` : ''}.` : '';
+        return;
+      }
       const dias = parseFloat($('#n-dias', f).value.replace(',', '.'));
       const ini = new Date($('#n-inicio', f).value);
       if (!(int > 0 && dias > 0) || isNaN(ini)) return ($('#n-previa', f).textContent = '');
@@ -1025,21 +1142,46 @@ function modalTratamento(nomeInicial = '') {
       const fim = new Date(ini.getTime() + (n - 1) * int * HORA);
       $('#n-previa', f).textContent = `${n} doses: de ${diaMes(ini)} ${hora(ini)} até ${diaMes(fim)} ${hora(fim)}.`;
     };
+    const mudarTipo = (t) => {
+      tipo = t;
+      $$('#n-tipo button', f).forEach((b) => b.classList.toggle('ativo', b.dataset.tipo === t));
+      $$('.so-agendado', f).forEach((el) => (el.hidden = t !== 'agendado'));
+      $$('.so-sos', f).forEach((el) => (el.hidden = t !== 'sos'));
+      $('#n-int-rot', f).textContent = t === 'sos' ? 'Intervalo mínimo (horas)' : 'A cada (horas)';
+      $('#n-explica', f).textContent = t === 'sos'
+        ? 'Para dar só quando precisar (dor, febre, enjoo). Não tem duração nem lembretes; o app avisa se ainda não passou o intervalo.'
+        : 'Para remédios com horário certo por alguns dias. O app lembra em cada horário.';
+      $('#n-ok', f).textContent = t === 'sos' ? 'Salvar' : 'Criar e ativar lembretes';
+      previa();
+    };
+    $$('#n-tipo button', f).forEach((b) => b.onclick = () => mudarTipo(b.dataset.tipo));
     $$('input', f).forEach((i) => i.addEventListener('input', previa));
-    previa();
+    mudarTipo(tipo);
     $('#n-ok', f).onclick = async () => {
       const nome = $('#n-nome', f).value.trim();
       const int = parseFloat($('#n-int', f).value.replace(',', '.'));
       const dias = parseFloat($('#n-dias', f).value.replace(',', '.'));
+      const max = parseInt($('#n-max', f).value, 10) || null;
       const ini = deInput($('#n-inicio', f).value);
       const ja = $('#n-ja', f).checked;
       const dados = { dose: $('#n-dose', f).value.trim() || null, recalc: $('#n-recalc', f).checked, obs: $('#n-obs', f).value.trim() || null };
       if (!nome) return toast('Informe o remédio.');
-      if (!(int > 0) || !(dias > 0)) return toast('Informe o intervalo e a quantidade de dias.');
+      if (!(int > 0)) return toast('Informe o intervalo em horas.');
+      if (tipo === 'agendado' && !(dias > 0)) return toast('Informe a quantidade de dias.');
       fecharModal();
       try {
         if (!(await garantirRemedio(nome))) return;
         const nomeFinal = acharRemedio(nome)?.nome || nome;
+        if (tipo === 'sos') {
+          await q(sb.from('tratamentos').insert({
+            familia_id: S.familia.id, pessoa_id: p.id, remedio: nomeFinal, dose: dados.dose,
+            intervalo_horas: int, dias: null, inicio: new Date().toISOString(), tipo: 'sos',
+            max_doses_dia: max, recalcular: false, observacao: dados.obs,
+          }));
+          toast(`✓ ${nomeFinal} adicionado em "Se necessário"`);
+          S.aba = 'hoje';
+          return render();
+        }
         if (!(await verificarAlertas(p.id, nomeFinal, ja ? ini : new Date(Math.max(Date.now(), new Date(ini))).toISOString()))) return;
         const id = await q(sb.rpc('criar_tratamento', {
           p_pessoa: p.id, p_remedio: nomeFinal, p_dose: dados.dose, p_intervalo: int, p_dias: dias,
