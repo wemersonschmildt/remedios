@@ -303,17 +303,24 @@ function telaLogin(msg = '', ok = false) {
       <button class="link" id="l-esqueci" style="font-weight:400;font-size:14px">Esqueci a senha</button>
     </div>`;
   const dados = () => ({ email: $('#l-email').value.trim(), password: $('#l-senha').value });
-  $('#l-entrar').onclick = async () => {
+  // Evita enviar duas vezes com toque duplo
+  const travar = (fn) => async (ev) => {
+    const btns = $$('.login button');
+    if (btns.some((b) => b.disabled)) return;
+    btns.forEach((b) => (b.disabled = true));
+    try { await fn(ev); } finally { btns.forEach((b) => (b.disabled = false)); }
+  };
+  $('#l-entrar').onclick = travar(async () => {
     const { error } = await sb.auth.signInWithPassword(dados());
     if (error) telaLogin(error.message.includes('Invalid') ? 'E-mail ou senha incorretos.' : error.message.includes('confirmed') ? 'Confirme seu e-mail pelo link que enviamos antes de entrar.' : error.message);
-  };
-  $('#l-criar').onclick = async () => {
+  });
+  $('#l-criar').onclick = travar(async () => {
     const d = dados();
     if (!d.email || d.password.length < 6) return telaLogin('Informe o e-mail e uma senha com pelo menos 6 caracteres.');
     const { data, error } = await sb.auth.signUp({ ...d, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (error) return telaLogin(error.message);
+    if (error) return telaLogin(/already|registered|exists/i.test(error.message) ? 'Este e-mail já tem conta. Toque em Entrar (ou em "Esqueci a senha").' : error.message);
     if (!data.session) telaLogin('Conta criada! Abra o e-mail de confirmação e toque no link. Depois volte aqui e entre.', true);
-  };
+  });
   $('#l-esqueci').onclick = async () => {
     const email = $('#l-email').value.trim();
     if (!email) return telaLogin('Digite seu e-mail e toque em "Esqueci a senha" de novo.');
