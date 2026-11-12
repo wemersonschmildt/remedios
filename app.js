@@ -1041,6 +1041,7 @@ async function htmlTratamentos() {
       <div class="progresso"><div style="width:${i.total ? (100 * i.tomadas / i.total) : 0}%"></div></div>
       <div class="botoes" style="margin-top:10px">
         <button class="btn pequeno neutro" data-doses="${t.id}">Ver doses</button>
+        <button class="btn pequeno" data-editar="${t.id}">Editar</button>
         <button class="btn pequeno perigo" data-encerrar="${t.id}">Encerrar</button>
       </div>
     </div>`;
@@ -1053,6 +1054,7 @@ async function htmlTratamentos() {
       <div class="dose-info">${t.dose ? esc(t.dose) + ' · ' : ''}intervalo mínimo ${fmtNum(t.intervalo_horas)}h${t.max_doses_dia ? ` · máx. ${t.max_doses_dia} em 24h` : ''}</div>
       ${t.observacao ? `<div class="dose-info">📝 ${esc(t.observacao)}</div>` : ''}
       <div class="botoes" style="margin-top:10px">
+        <button class="btn pequeno" data-editar="${t.id}">Editar</button>
         <button class="btn pequeno perigo" data-encerrar="${t.id}">Encerrar</button>
       </div>
     </div>`;
@@ -1080,6 +1082,83 @@ function ligarTratamentos() {
     try { await q(sb.rpc('encerrar_tratamento', { p_tratamento: b.dataset.encerrar })); render(); } catch (e) { erro(e); }
   });
   $$('[data-doses]').forEach((b) => b.onclick = () => modalDosesTratamento(b.dataset.doses));
+  $$('[data-editar]').forEach((b) => b.onclick = () => modalEditarTratamento(cacheTrat.find((x) => x.id === b.dataset.editar)));
+}
+
+async function modalEditarTratamento(t) {
+  const sos = t.tipo === 'sos';
+  let ultimaTomada = null, primeiraPendente = null;
+  if (!sos) {
+    const ds = await q(sb.from('doses').select('status, previsto_em, tomado_em').eq('tratamento_id', t.id));
+    ultimaTomada = ds.filter((d) => d.status === 'tomada' && d.tomado_em).map((d) => new Date(d.tomado_em)).sort((a, b) => b - a)[0] || null;
+    primeiraPendente = ds.filter((d) => d.status === 'pendente').map((d) => new Date(d.previsto_em)).sort((a, b) => a - b)[0] || null;
+  }
+  abrirModal(`
+    <h2>Editar ${esc(t.remedio)}</h2>
+    <label class="campo"><span>Remédio</span><div class="auto" id="et-auto"><input type="text" id="et-nome" value="${esc(t.remedio)}" autocomplete="off"></div></label>
+    <label class="campo"><span>Dose</span><input type="text" id="et-dose" value="${esc(t.dose || '')}"></label>
+    <div class="linha-campos">
+      <label class="campo"><span>${sos ? 'Intervalo mínimo (horas)' : 'A cada (horas)'}</span><input type="number" id="et-int" value="${+t.intervalo_horas}" min="0.5" step="0.5" inputmode="decimal"></label>
+      ${sos
+        ? `<label class="campo"><span>Máx. em 24h (opcional)</span><input type="number" id="et-max" value="${t.max_doses_dia || ''}" min="1" step="1" inputmode="numeric"></label>`
+        : `<label class="campo"><span>Duração total (dias)</span><input type="number" id="et-dias" value="${+t.dias}" min="0.5" step="0.5" inputmode="decimal"></label>`}
+    </div>
+    ${sos ? '' : `
+      <label class="campo"><span>Próxima dose</span><input type="datetime-local" id="et-prox"></label>
+      <p class="dica">${ultimaTomada ? `Última dose dada: ${diaMes(ultimaTomada)} às ${hora(ultimaTomada)}. A próxima é calculada a partir dela.` : 'Nenhuma dose dada ainda.'} Início do tratamento: ${diaMes(t.inicio)} às ${hora(t.inicio)}.</p>
+      <label class="check"><input type="checkbox" id="et-recalc" ${t.recalcular ? 'checked' : ''}> <span>Se uma dose atrasar, recalcular as próximas</span></label>`}
+    <label class="campo"><span>Observação</span><input type="text" id="et-obs" value="${esc(t.observacao || '')}"></label>
+    <p class="dica" id="et-previa"></p>
+    <button class="btn primario bloco" id="et-ok">Salvar</button>`, (f) => {
+    montarAutoRemedio($('#et-auto', f));
+    let proxEditada = false;
+    const proxSugerida = () => {
+      const int = parseFloat($('#et-int', f).value.replace(',', '.')) || +t.intervalo_horas;
+      if (ultimaTomada) return new Date(ultimaTomada.getTime() + int * HORA);
+      return primeiraPendente || new Date(t.inicio);
+    };
+    const previa = () => {
+      if (sos) return;
+      if (!proxEditada) $('#et-prox', f).value = paraInput(proxSugerida());
+      const int = parseFloat($('#et-int', f).value.replace(',', '.'));
+      const dias = parseFloat($('#et-dias', f).value.replace(',', '.'));
+      const prox = new Date($('#et-prox', f).value);
+      const fim = new Date(new Date(t.inicio).getTime() + dias * 24 * HORA);
+      if (!(int > 0 && dias > 0) || isNaN(prox)) return ($('#et-previa', f).textContent = '');
+      const n = Math.max(0, Math.ceil((fim - prox) / (int * HORA)));
+      if (!n) return ($('#et-previa', f).textContent = 'Com esses valores não sobra nenhuma dose: o tratamento termina antes da próxima.');
+      const ult = new Date(prox.getTime() + (n - 1) * int * HORA);
+      $('#et-previa', f).textContent = `Ficam ${n} dose(s) pela frente: de ${diaMes(prox)} ${hora(prox)} até ${diaMes(ult)} ${hora(ult)}.`;
+    };
+    if (!sos) $('#et-prox', f).addEventListener('input', () => { proxEditada = true; previa(); });
+    $$('#et-int, #et-dias', f).forEach((i) => i.addEventListener('input', previa));
+    previa();
+    $('#et-ok', f).onclick = async () => {
+      const nome = $('#et-nome', f).value.trim();
+      const int = parseFloat($('#et-int', f).value.replace(',', '.'));
+      if (!nome || !(int > 0)) return toast('Informe o remédio e o intervalo.');
+      const dose = $('#et-dose', f).value.trim() || null;
+      const obs = $('#et-obs', f).value.trim() || null;
+      try {
+        if (sos) {
+          await q(sb.from('tratamentos').update({
+            remedio: nome, dose, intervalo_horas: int, observacao: obs,
+            max_doses_dia: parseInt($('#et-max', f).value, 10) || null,
+          }).eq('id', t.id));
+        } else {
+          const dias = parseFloat($('#et-dias', f).value.replace(',', '.'));
+          if (!(dias > 0)) return toast('Informe a duração em dias.');
+          await q(sb.rpc('editar_tratamento', {
+            p_tratamento: t.id, p_remedio: nome, p_dose: dose, p_intervalo: int, p_dias: dias,
+            p_proxima: deInput($('#et-prox', f).value), p_recalcular: $('#et-recalc', f).checked, p_observacao: obs,
+          }));
+        }
+        fecharModal();
+        toast('✓ Tratamento atualizado');
+        render();
+      } catch (e) { erro(e); }
+    };
+  });
 }
 
 async function modalDosesTratamento(id) {
