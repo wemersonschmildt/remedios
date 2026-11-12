@@ -140,7 +140,11 @@ textarea { min-height: 90px; resize: vertical; }
 /* Modal (folha inferior) */
 .fundo-modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 50; display: flex; align-items: flex-end; animation: aparecer .15s ease; }
 .folha { background: var(--fundo); width: 100%; max-height: 92vh; overflow-y: auto; border-radius: 20px 20px 0 0; padding: 10px 16px calc(16px + env(safe-area-inset-bottom)); animation: subir .2s ease; }
-.folha .alca { width: 40px; height: 5px; border-radius: 3px; background: var(--borda); margin: 0 auto 10px; }
+.folha .alca { width: 40px; height: 5px; border-radius: 3px; background: var(--borda); margin: 0 auto; }
+.folha-topo { position: sticky; top: -10px; z-index: 6; background: var(--fundo); margin: -10px -16px 6px; padding: 10px 16px 4px; display: flex; justify-content: center; align-items: center; min-height: 34px; }
+.fechar-modal { position: absolute; right: 12px; top: 8px; width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--borda); color: var(--texto); font-size: 15px; font-weight: 700; cursor: pointer; }
+.descartar { position: sticky; bottom: 0; background: var(--cartao); border-radius: 14px; padding: 12px; margin-top: 12px; box-shadow: 0 -4px 20px rgba(0,0,0,.15); font-weight: 600; }
+.descartar .botoes { margin-top: 10px; }
 .folha h2 { margin: 0 0 14px; font-size: 20px; }
 @keyframes aparecer { from { opacity: 0 } }
 @keyframes subir { from { transform: translateY(40px); opacity: .5 } }

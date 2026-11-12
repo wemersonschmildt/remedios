@@ -113,11 +113,33 @@ function abrirModal(html, aoMontar) {
   fecharModal();
   S.modalAberto = true;
   const raiz = $('#modal-raiz');
-  raiz.innerHTML = `<div class="fundo-modal"><div class="folha"><div class="alca"></div>${html}</div></div>`;
+  raiz.innerHTML = `<div class="fundo-modal"><div class="folha">
+    <div class="folha-topo"><div class="alca"></div><button class="fechar-modal" aria-label="Fechar">✕</button></div>
+    ${html}</div></div>`;
   const fundo = raiz.firstChild;
-  fundo.addEventListener('click', (e) => { if (e.target === fundo) fecharModal(); });
-  aoMontar?.(fundo.firstChild);
-  return fundo.firstChild;
+  const folha = fundo.firstChild;
+  // Se algo foi digitado, pergunta antes de descartar
+  let alterado = false;
+  folha.addEventListener('input', () => (alterado = true));
+  folha.addEventListener('change', (e) => { if (e.target.matches('input, select, textarea')) alterado = true; });
+  const tentarFechar = () => {
+    if (!alterado) return fecharModal();
+    if ($('.descartar', folha)) return;
+    const barra = document.createElement('div');
+    barra.className = 'descartar';
+    barra.innerHTML = `<div>Sair sem salvar? O que foi digitado será perdido.</div>
+      <div class="botoes"><button class="btn neutro" data-d="0">Continuar editando</button><button class="btn perigo" data-d="1">Sair sem salvar</button></div>`;
+    folha.appendChild(barra);
+    barra.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    $$('[data-d]', barra).forEach((b) => b.onclick = () => (b.dataset.d === '1' ? fecharModal() : barra.remove()));
+  };
+  fundo.addEventListener('click', (e) => { if (e.target === fundo) tentarFechar(); });
+  $('.fechar-modal', folha).onclick = tentarFechar;
+  folha.tentarFechar = tentarFechar;
+  aoMontar?.(folha);
+  // Botões "Cancelar" dentro dos formulários
+  $$('[data-cancelar]', folha).forEach((b) => b.onclick = tentarFechar);
+  return folha;
 }
 function fecharModal() {
   $('#modal-raiz').innerHTML = '';
@@ -1144,7 +1166,7 @@ async function modalEditarTratamento(t) {
       <label class="check"><input type="checkbox" id="et-recalc" ${t.recalcular ? 'checked' : ''}> <span>Se uma dose atrasar, recalcular as próximas</span></label>`}
     <label class="campo"><span>Observação</span><input type="text" id="et-obs" value="${esc(t.observacao || '')}"></label>
     <p class="dica" id="et-previa"></p>
-    <button class="btn primario bloco" id="et-ok">Salvar</button>`, (f) => {
+    <div class="botoes"><button class="btn neutro" data-cancelar style="flex:.6">Cancelar</button><button class="btn primario" id="et-ok">Salvar</button></div>`, (f) => {
     montarAutoRemedio($('#et-auto', f));
     let proxEditada = false;
     const proxSugerida = () => {
@@ -1239,7 +1261,7 @@ function modalTratamento(nomeInicial = '', tipoInicial = 'agendado') {
     </div>
     <label class="campo"><span>Observação (opcional)</span><input type="text" id="n-obs" placeholder="ex.: só se febre acima de 37,8°C"></label>
     <p class="dica" id="n-previa"></p>
-    <button class="btn primario bloco" id="n-ok"></button>`, (f) => {
+    <div class="botoes"><button class="btn neutro" data-cancelar style="flex:.6">Cancelar</button><button class="btn primario" id="n-ok"></button></div>`, (f) => {
     let tipo = tipoInicial;
     montarAutoRemedio($('#n-auto', f));
     const previa = () => {

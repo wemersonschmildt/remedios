@@ -1,5 +1,5 @@
 // Service worker: recebe as notificações e guarda os arquivos do app para abrir rápido
-const CACHE = 'remedios-v7';
+const CACHE = 'remedios-v8';
 const ARQUIVOS = ['./', './index.html', './estilo.css', './app.js', './remedios-base.js', './relatorio-comum.js', './saude.js', './restricoes.js', './manifest.json', './icones/icone-192.png'];
 
 self.addEventListener('install', (e) => {

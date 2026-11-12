@@ -173,7 +173,7 @@ function modalFicha(p) {
     </div>
     ${area('f-med', 'Médicos de confiança (nome, especialidade, telefone)', p.medicos_confianca)}
     ${area('f-obs', 'Outras observações', p.observacoes_saude)}
-    <button class="btn primario bloco" id="f-ok">Salvar</button>`, (f) => {
+    <div class="botoes"><button class="btn neutro" data-cancelar style="flex:.6">Cancelar</button><button class="btn primario" id="f-ok">Salvar</button></div>`, (f) => {
     $$('[data-ver-rest]', f).forEach((a) => a.onclick = (e) => { e.preventDefault(); modalRestricoes(a.dataset.verRest); });
     $('#f-ok', f).onclick = async () => {
       const v = (id) => $(id, f).value.trim() || null;
@@ -206,7 +206,7 @@ function modalConsulta(c, base = {}) {
     <label class="campo"><span>Endereço (para abrir no mapa)</span><input type="text" id="c-end" value="${esc(d.endereco || '')}"></label>
     <label class="campo"><span>Observação</span><input type="text" id="c-obs" value="${esc(d.observacao || '')}" placeholder="ex.: levar exames de sangue"></label>
     <p class="dica">Lembrete no dia anterior e 2 horas antes.</p>
-    <button class="btn primario bloco" id="c-ok">Salvar</button>${opcoesEspecialidade}`, (f) => {
+    <div class="botoes"><button class="btn neutro" data-cancelar style="flex:.6">Cancelar</button><button class="btn primario" id="c-ok">Salvar</button></div>${opcoesEspecialidade}`, (f) => {
     $('#c-ok', f).onclick = async () => {
       const v = (id) => $(id, f).value.trim() || null;
       const dados = {
@@ -327,7 +327,7 @@ function modalAtendimento(a, consulta = null) {
     <div id="at-lista-arq" class="dica" style="margin:0 2px 12px"></div>
     ${a ? '' : `<label class="check"><input type="checkbox" id="at-ret-ok"> <span>Médico pediu retorno</span></label>
     <label class="campo" id="at-ret-campo" hidden><span>Data e hora do retorno</span><input type="datetime-local" id="at-ret"></label>`}
-    <button class="btn primario bloco" id="at-ok">Salvar</button>${opcoesEspecialidade}${opcoesSetor}`, (f) => {
+    <div class="botoes"><button class="btn neutro" data-cancelar style="flex:.6">Cancelar</button><button class="btn primario" id="at-ok">Salvar</button></div>${opcoesEspecialidade}${opcoesSetor}`, (f) => {
     const durInt = () => {
       const e = $('#at-int-ent', f).value, s = $('#at-int-sai', f).value;
       $('#at-int-dur', f).textContent = e ? (s ? `Tempo de internação: ${tempoInternado(new Date(e), new Date(s))}` : `Internado há ${tempoInternado(new Date(e))}`) : '';
