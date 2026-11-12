@@ -643,6 +643,7 @@ function ligarHoje() {
   $$('[data-outro]').forEach((b) => b.onclick = () => abrirDose(b.dataset.outro));
   $('#btn-avulso').onclick = () => modalAvulso();
   $$('[data-consulta-hoje]').forEach((el) => el.onclick = () => abrirConsulta(el.dataset.consultaHoje));
+  $$('[data-atend-hoje]').forEach((el) => el.onclick = () => abrirAtendimento(el.dataset.atendHoje));
   $$('[data-sos]').forEach((b) => b.onclick = () => darSos(b.dataset.sos));
   $$('[data-sos-outro]').forEach((b) => b.onclick = () => {
     const t = cacheHoje.sos.find((x) => x.id === b.dataset.sosOutro);

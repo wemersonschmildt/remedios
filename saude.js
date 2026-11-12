@@ -20,6 +20,16 @@ const dataBR = (d) => new Date(d).toLocaleDateString('pt-BR');
 const opcoesEspecialidade = `<datalist id="lista-especialidades">${ESPECIALIDADES.map((e) => `<option value="${esc(e)}">`).join('')}</datalist>`;
 
 let cacheSaude = {};
+
+function tempoInternado(entrada, saida) {
+  const ms = new Date(saida || Date.now()) - new Date(entrada);
+  if (!(ms >= 0)) return '';
+  const h = Math.floor(ms / HORA), d = Math.floor(h / 24), hr = h % 24;
+  if (d === 0) return `${h}h${String(Math.floor((ms % HORA) / 60e3)).padStart(2, '0')}`;
+  return `${d} dia${d > 1 ? 's' : ''}${hr ? ` e ${hr}h` : ''}`;
+}
+const SETORES = ['Observação (PS)', 'Enfermaria / quarto', 'Semi-intensiva', 'UTI', 'Centro cirúrgico'];
+const opcoesSetor = `<datalist id="lista-setores">${SETORES.map((s) => `<option value="${esc(s)}">`).join('')}</datalist>`;
 S.limiteAtendimentos = 10;
 
 async function htmlSaude() {
@@ -38,6 +48,9 @@ async function htmlSaude() {
   const futuras = consultas.filter((c) => !passadas.includes(c));
 
   let html = '';
+  for (const a of atendimentos.filter((x) => x.internado && !x.internacao_saida)) {
+    html += `<div class="alerta-alergia item-clicavel" data-atendimento="${a.id}" style="background:var(--primaria-suave);color:var(--primaria)"><b>🏥 Internado agora</b>Desde ${dataBR(a.internacao_entrada || a.data_hora)} às ${hora(a.internacao_entrada || a.data_hora)} (${tempoInternado(a.internacao_entrada || a.data_hora)})${a.local ? ' · ' + esc(a.local) : ''}. Toque para registrar a alta.</div>`;
+  }
   for (const c of p.condicoes_especiais || []) {
     if (RESTRICOES[c]) html += `<div class="alerta-alergia item-clicavel" data-restricao="${c}" style="background:var(--laranja-suave);color:var(--laranja)"><b>🧬 ${esc(RESTRICOES[c].nome)}</b>O app avisa ao registrar remédios restritos. Toque para ver a lista.</div>`;
   }
@@ -83,6 +96,7 @@ async function htmlSaude() {
     ? `<div class="lista">${lista.map((a) => `<div class="item item-clicavel" data-atendimento="${a.id}">
         <div style="min-width:0"><div>${ICONE_ATENDIMENTO[a.tipo] || '🩺'} ${esc(a.tipo)}${a.especialidade ? ' · ' + esc(a.especialidade) : ''}</div>
         <div class="sub">${dataBR(a.data_hora)}${a.medico ? ' · ' + esc(a.medico) : ''}${qtdAnexos[a.id] ? ` · 📎 ${qtdAnexos[a.id]}` : ''}</div>
+        ${a.internado ? `<div class="sub">🏥 ${a.internacao_saida ? `internado ${tempoInternado(a.internacao_entrada || a.data_hora, a.internacao_saida)}` : '<b>internado agora</b>'}</div>` : ''}
         ${a.diagnostico ? `<div class="sub" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.diagnostico)}</div>` : ''}</div>
         <span class="sub">›</span></div>`).join('')}</div>`
     : `<div class="vazio" style="padding:8px">Nenhum atendimento registrado.</div>`;
@@ -298,13 +312,36 @@ function modalAtendimento(a, consulta = null) {
     ${area('at-exped', 'Exames pedidos', d.exames_pedidos)}
     ${area('at-exres', 'Resultados de exames', d.exames_resultados)}
     ${area('at-obs', 'Outras observações', d.observacoes)}
+    <div class="secao-titulo" style="margin-top:4px">Internação</div>
+    <label class="check"><input type="checkbox" id="at-int-ok" ${d.internado ? 'checked' : ''}> <span>Precisou ficar internado</span></label>
+    <div id="at-int" ${d.internado ? '' : 'hidden'}>
+      <label class="campo"><span>Entrada (data e hora)</span><input type="datetime-local" id="at-int-ent" value="${d.internacao_entrada ? paraInput(d.internacao_entrada) : ''}"></label>
+      <label class="campo"><span>Saída / alta (deixe vazio se ainda está internado)</span><input type="datetime-local" id="at-int-sai" value="${d.internacao_saida ? paraInput(d.internacao_saida) : ''}"></label>
+      <label class="campo"><span>Setor</span><input type="text" id="at-int-setor" list="lista-setores" value="${esc(d.internacao_setor || '')}" placeholder="ex.: Enfermaria, UTI"></label>
+      <label class="campo"><span>Resumo da internação / alta</span><textarea id="at-int-resumo" style="min-height:64px" placeholder="ex.: hidratação venosa, exames, orientações da alta">${esc(d.internacao_resumo || '')}</textarea></label>
+      <p class="dica" id="at-int-dur"></p>
+    </div>
     <div class="secao-titulo" style="margin-top:4px">Anexos (receita, exames, laudos)</div>
     <label class="btn bloco" style="display:block;text-align:center;margin-bottom:8px">📎 Adicionar fotos ou PDF
       <input type="file" id="at-arq" accept="image/*,application/pdf" multiple hidden></label>
     <div id="at-lista-arq" class="dica" style="margin:0 2px 12px"></div>
     ${a ? '' : `<label class="check"><input type="checkbox" id="at-ret-ok"> <span>Médico pediu retorno</span></label>
     <label class="campo" id="at-ret-campo" hidden><span>Data e hora do retorno</span><input type="datetime-local" id="at-ret"></label>`}
-    <button class="btn primario bloco" id="at-ok">Salvar</button>${opcoesEspecialidade}`, (f) => {
+    <button class="btn primario bloco" id="at-ok">Salvar</button>${opcoesEspecialidade}${opcoesSetor}`, (f) => {
+    const durInt = () => {
+      const e = $('#at-int-ent', f).value, s = $('#at-int-sai', f).value;
+      $('#at-int-dur', f).textContent = e ? (s ? `Tempo de internação: ${tempoInternado(new Date(e), new Date(s))}` : `Internado há ${tempoInternado(new Date(e))}`) : '';
+    };
+    const ligarInt = (marcado) => {
+      $('#at-int-ok', f).checked = marcado;
+      $('#at-int', f).hidden = !marcado;
+      if (marcado && !$('#at-int-ent', f).value) $('#at-int-ent', f).value = $('#at-quando', f).value;
+      durInt();
+    };
+    $('#at-int-ok', f).onchange = (e) => ligarInt(e.target.checked);
+    $('#at-tipo', f).addEventListener('change', (e) => { if (e.target.value === 'Internação') ligarInt(true); });
+    $$('#at-int-ent, #at-int-sai', f).forEach((i) => i.addEventListener('input', durInt));
+    durInt();
     const mostrarArquivos = () => {
       $('#at-lista-arq', f).innerHTML = arquivos.map((x, i) => `<div>📄 ${esc(x.name)} <a href="#" data-rm="${i}">remover</a></div>`).join('');
       $$('[data-rm]', f).forEach((el) => el.onclick = (e) => { e.preventDefault(); arquivos.splice(+el.dataset.rm, 1); mostrarArquivos(); });
@@ -331,7 +368,16 @@ function modalAtendimento(a, consulta = null) {
         temperatura: v('#at-temp'), peso: v('#at-peso'), pressao: v('#at-pa'), saturacao: v('#at-sat'),
         diagnostico: v('#at-diag'), orientacoes: v('#at-orient'), receita: v('#at-receita'),
         exames_pedidos: v('#at-exped'), exames_resultados: v('#at-exres'), observacoes: v('#at-obs'),
+        internado: $('#at-int-ok', f).checked,
       };
+      if (dados.internado) {
+        const ent = $('#at-int-ent', f).value, sai = $('#at-int-sai', f).value;
+        if (ent && sai && new Date(sai) < new Date(ent)) return toast('A saída não pode ser antes da entrada.');
+        Object.assign(dados, {
+          internacao_entrada: ent ? deInput(ent) : dados.data_hora, internacao_saida: sai ? deInput(sai) : null,
+          internacao_setor: v('#at-int-setor'), internacao_resumo: v('#at-int-resumo'),
+        });
+      } else Object.assign(dados, { internacao_entrada: null, internacao_saida: null, internacao_setor: null, internacao_resumo: null });
       const retorno = $('#at-ret-ok', f)?.checked && $('#at-ret', f).value ? deInput($('#at-ret', f).value) : null;
       const btn = $('#at-ok', f);
       btn.disabled = true; btn.textContent = arquivos.length ? 'Enviando anexos…' : 'Salvando…';
@@ -405,6 +451,13 @@ async function abrirAtendimento(id) {
         <div class="dose-info">${esc([a.especialidade, a.medico, a.local].filter(Boolean).join(' · '))}</div>
         ${sinais ? `<div style="margin-top:8px">${esc(sinais)}</div>` : ''}
       </div>
+      ${a.internado ? `<div class="cartao">
+        <div class="dose-nome">🏥 ${a.internacao_saida ? 'Internação' : 'Internado agora'}${a.internacao_setor ? ' · ' + esc(a.internacao_setor) : ''}</div>
+        <div class="dose-info">Entrada: ${dataBR(a.internacao_entrada || a.data_hora)} às ${hora(a.internacao_entrada || a.data_hora)}</div>
+        <div class="dose-info">${a.internacao_saida ? `Alta: ${dataBR(a.internacao_saida)} às ${hora(a.internacao_saida)}` : 'Ainda sem alta'} · ${tempoInternado(a.internacao_entrada || a.data_hora, a.internacao_saida)}</div>
+        ${a.internacao_resumo ? `<div style="margin-top:8px">${esc(a.internacao_resumo).replace(/\n/g, '<br>')}</div>` : ''}
+        ${a.internacao_saida ? '' : '<button class="btn verde bloco" id="ad-alta" style="margin-top:10px">Registrar alta</button>'}
+      </div>` : ''}
       <div class="cartao">
         ${campo('Motivo / sintomas', a.motivo)}${campo('Diagnóstico', a.diagnostico)}${campo('Orientações', a.orientacoes)}
         ${campo('Receita', a.receita)}${campo('Exames pedidos', a.exames_pedidos)}${campo('Resultados de exames', a.exames_resultados)}
@@ -444,6 +497,7 @@ async function abrirAtendimento(id) {
       };
       $('#ad-retorno', f).onclick = () => modalConsulta(null, { medico: a.medico, especialidade: a.especialidade, local: a.local, observacao: 'Retorno', origem_atendimento_id: a.id });
       $('#ad-editar', f).onclick = () => modalAtendimento(a);
+      $('#ad-alta', f)?.addEventListener('click', () => modalAlta(a));
       $('#ad-excluir', f).onclick = async () => {
         if (!(await confirmar('Excluir atendimento?', 'O registro e os anexos serão apagados.', 'Excluir', true))) return;
         try {
@@ -454,6 +508,27 @@ async function abrirAtendimento(id) {
       };
     });
   } catch (e) { erro(e); }
+}
+
+function modalAlta(a) {
+  abrirModal(`
+    <h2>🏥 Registrar alta — ${esc(nomePessoa(a.pessoa_id))}</h2>
+    <label class="campo"><span>Data e hora da alta</span><input type="datetime-local" id="al-quando" value="${paraInput(new Date())}"></label>
+    <label class="campo"><span>Resumo da internação / orientações da alta</span><textarea id="al-resumo" style="min-height:90px">${esc(a.internacao_resumo || '')}</textarea></label>
+    <p class="dica" id="al-dur"></p>
+    <button class="btn verde bloco" id="al-ok">Salvar alta</button>`, (f) => {
+    const ent = a.internacao_entrada || a.data_hora;
+    const dur = () => ($('#al-dur', f).textContent = `Tempo de internação: ${tempoInternado(ent, new Date($('#al-quando', f).value))}`);
+    $('#al-quando', f).addEventListener('input', dur); dur();
+    $('#al-ok', f).onclick = async () => {
+      const sai = deInput($('#al-quando', f).value);
+      if (new Date(sai) < new Date(ent)) return toast('A alta não pode ser antes da entrada.');
+      try {
+        await q(sb.from('atendimentos').update({ internacao_saida: sai, internacao_resumo: $('#al-resumo', f).value.trim() || null }).eq('id', a.id));
+        fecharModal(); toast('✓ Alta registrada'); render(); abrirAtendimento(a.id);
+      } catch (e) { erro(e); }
+    };
+  });
 }
 
 // ---------- Vacinas ----------
@@ -582,6 +657,15 @@ async function dadosRelatorio(pessoaId, periodo) {
 
 // Cartões de consulta na tela Hoje
 async function htmlConsultasHoje(p) {
+  const internacoes = await q(sb.from('atendimentos').select('id, local, data_hora, internacao_entrada, internacao_setor').eq('pessoa_id', p.id).eq('internado', true).is('internacao_saida', null));
+  const htmlInt = internacoes.map((a) => `<div class="cartao item-clicavel" data-atend-hoje="${a.id}" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div><div class="dose-nome">🏥 Internado${a.internacao_setor ? ' · ' + esc(a.internacao_setor) : ''}</div>
+      <div class="dose-info">Desde ${diaMes(a.internacao_entrada || a.data_hora)} às ${hora(a.internacao_entrada || a.data_hora)}${a.local ? ' · ' + esc(a.local) : ''}</div></div>
+      <span class="etiqueta futura">${tempoInternado(a.internacao_entrada || a.data_hora)}</span></div>`).join('');
+  return htmlInt + await htmlConsultasProximas(p);
+}
+
+async function htmlConsultasProximas(p) {
   const consultas = await q(sb.from('consultas').select('*').eq('pessoa_id', p.id).eq('status', 'agendada')
     .lte('data_hora', new Date(Date.now() + 7 * 24 * HORA).toISOString()).order('data_hora'));
   return consultas.map((c) => {

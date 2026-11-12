@@ -23,6 +23,12 @@ function rlIdade(nasc) {
   return `${anos} anos${anos < 12 && meses ? ` e ${meses} ${meses === 1 ? 'mês' : 'meses'}` : ''}`;
 }
 
+function rlDuracao(ent, sai) {
+  const ms = new Date(sai) - new Date(ent);
+  const h = Math.floor(ms / 3600e3), d = Math.floor(h / 24);
+  return d ? `${d} dia(s)${h % 24 ? ` e ${h % 24}h` : ''}` : `${h}h`;
+}
+
 const RL_SUFIXO = { Febre: ' °C', 'Bebeu líquido': ' ml' };
 
 function montarSecoesRelatorio(d) {
@@ -85,6 +91,8 @@ function montarSecoesRelatorio(d) {
   for (const [rem, lista] of Object.entries(porRemedio)) {
     resumo.push([rem, `${lista.length} dose(s), última em ${rlDataHora(lista.at(-1).tomado_em)}`]);
   }
+  const ints = (d.atendimentos || []).filter((a) => a.internado);
+  if (ints.length) resumo.unshift(['Internações', ints.map((a) => `${rlData(a.internacao_entrada || a.data_hora)}${a.internacao_saida ? ` a ${rlData(a.internacao_saida)} (${rlDuracao(a.internacao_entrada || a.data_hora, a.internacao_saida)})` : ' (ainda internado)'}`).join('; ')]);
   if (resumo.length) secoes.push({ titulo: 'Resumo do período', blocos: [{ pares: resumo }] });
 
   // Próximas consultas
@@ -105,6 +113,8 @@ function montarSecoesRelatorio(d) {
         subtitulo: `${rlDataHora(a.data_hora)} — ${a.tipo}${a.especialidade ? ' · ' + a.especialidade : ''}${a.medico ? ' · ' + a.medico : ''}`,
         pares: [
           ['Local', a.local],
+          ['Internação', a.internado ? `entrada ${rlDataHora(a.internacao_entrada || a.data_hora)}${a.internacao_saida ? ` — alta ${rlDataHora(a.internacao_saida)} (${rlDuracao(a.internacao_entrada || a.data_hora, a.internacao_saida)})` : ' — ainda internado'}${a.internacao_setor ? ' · ' + a.internacao_setor : ''}` : ''],
+          ['Resumo da internação', a.internado ? a.internacao_resumo : ''],
           ['Motivo / sintomas', a.motivo],
           ['Sinais', [a.temperatura && `temp. ${a.temperatura} °C`, a.peso && `peso ${a.peso} kg`, a.pressao && `PA ${a.pressao}`, a.saturacao && `sat. ${a.saturacao}%`].filter(Boolean).join(' · ')],
           ['Diagnóstico', a.diagnostico],
@@ -143,7 +153,11 @@ function montarSecoesRelatorio(d) {
   };
   for (const x of d.doses || []) add(x.tomado_em, x.remedio, rlHora(x.tomado_em));
   for (const e of d.eventos || []) add(e.ocorrido_em, e.tipo, rlHora(e.ocorrido_em) + (e.valor ? ` (${e.valor}${RL_SUFIXO[e.tipo] || ''})` : ''));
-  for (const a of d.atendimentos || []) add(a.data_hora, `[${a.tipo}]`, rlHora(a.data_hora));
+  for (const a of d.atendimentos || []) {
+    add(a.data_hora, `[${a.tipo}]`, rlHora(a.data_hora));
+    if (a.internado && a.internacao_entrada) add(a.internacao_entrada, '[Internação - entrada]', rlHora(a.internacao_entrada));
+    if (a.internado && a.internacao_saida) add(a.internacao_saida, '[Alta]', rlHora(a.internacao_saida));
+  }
   if (dias.size) {
     secoes.push({
       titulo: 'Diário: remédios e sintomas por dia',
