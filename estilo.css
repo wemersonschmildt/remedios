@@ -153,7 +153,7 @@ textarea { min-height: 90px; resize: vertical; }
 /* Abas */
 .abas {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   background: color-mix(in srgb, var(--cartao) 92%, transparent);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid var(--borda);
@@ -185,3 +185,16 @@ pre.previa { white-space: pre-wrap; font-size: 13px; background: var(--cartao); 
 .segmento button { border: 0; background: none; padding: 9px; border-radius: 10px; font-weight: 600; color: var(--suave); }
 .segmento button.ativo { background: var(--cartao); color: var(--texto); box-shadow: var(--sombra); }
 [hidden] { display: none !important; }
+
+/* Saúde */
+.alerta-alergia { background: var(--vermelho-suave); color: var(--vermelho); border-radius: var(--raio); padding: 12px 14px; margin: 6px 0 10px; font-weight: 600; }
+.alerta-alergia b { display: block; font-size: 13px; text-transform: uppercase; letter-spacing: .03em; }
+.campo-ver { padding: 8px 0; border-top: 1px solid var(--borda); }
+.campo-ver:first-child { border-top: 0; padding-top: 0; }
+.campo-ver > span { display: block; font-size: 12px; color: var(--suave); font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin-bottom: 2px; }
+.galeria { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+.anexo { background: var(--cartao); border-radius: 12px; padding: 6px; text-align: center; box-shadow: var(--sombra); }
+.anexo img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }
+.anexo-pdf { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 36px; background: var(--fundo); border-radius: 8px; }
+.anexo-nome { font-size: 11px; color: var(--suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+.hora-chip.atend { background: var(--verde-suave); color: var(--verde); }

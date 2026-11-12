@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Histórico de saúde</title>
+  <style>
+    :root { --texto: #1c1d21; --suave: #6b7080; --borda: #e3e5ec; --azul: #2f6bff; --verm: #dc2626; --verm-suave: #fdecec; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f2f3f7; color: var(--texto); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 820px; margin: 0 auto; padding: 20px 16px 40px; }
+    .rel-cab h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -.01em; }
+    .rel-sub { color: var(--suave); font-size: 14px; margin-bottom: 14px; }
+    .acoes { display: flex; gap: 8px; margin: 0 0 16px; flex-wrap: wrap; }
+    .acoes button { border: 0; border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 600; background: var(--azul); color: #fff; cursor: pointer; }
+    .acoes button.sec { background: #e8efff; color: var(--azul); }
+    .rel-secao { background: #fff; border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+    .rel-secao h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--azul); margin: 0 0 8px; }
+    .rel-destaque { background: var(--verm-suave); }
+    .rel-destaque h2 { color: var(--verm); }
+    .rel-destaque p { font-weight: 700; color: var(--verm); font-size: 16px; }
+    .rel-bloco { padding: 6px 0; border-top: 1px solid var(--borda); }
+    .rel-bloco:first-of-type { border-top: 0; }
+    .rel-bloco h3 { font-size: 15px; margin: 4px 0 6px; }
+    p { margin: 4px 0; }
+    dl { margin: 0; display: grid; grid-template-columns: minmax(120px, 30%) 1fr; gap: 4px 12px; }
+    dt { color: var(--suave); font-size: 13px; font-weight: 600; }
+    dd { margin: 0; }
+    ul { margin: 0; padding-left: 18px; }
+    li { margin: 2px 0; }
+    .rel-anexos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .rel-anexos a { display: block; width: 110px; text-decoration: none; color: var(--texto); font-size: 12px; }
+    .rel-anexos img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; display: block; border: 1px solid var(--borda); }
+    .rel-anexos span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rel-arq { background: #f2f3f7; border-radius: 8px; padding: 30px 6px; text-align: center; font-size: 28px; }
+    .rel-arq span { font-size: 12px; }
+    .rel-rodape { color: var(--suave); font-size: 12px; text-align: center; margin-top: 20px; }
+    .msg { text-align: center; padding: 30vh 20px; color: var(--suave); }
+    @media (max-width: 520px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } }
+    @media print { body { background: #fff; } .acoes { display: none; } .rel-secao { box-shadow: none; border: 1px solid var(--borda); break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <main id="conteudo"><div class="msg">Carregando histórico…</div></main>
+  <script src="relatorio-comum.js"></script>
+  <script>
+    const FUNCAO = 'https://kjqrajrxlnufbwmhavlj.supabase.co/functions/v1/relatorio';
+    const CHAVE = 'sb_publishable_lSc8cqiSkB97YMrZ4bpUAg_OmqdCWIc';
+    const el = document.getElementById('conteudo');
+    const token = new URLSearchParams(location.search).get('t');
+
+    (async () => {
+      if (!token) { el.innerHTML = '<div class="msg">Link inválido.</div>'; return; }
+      try {
+        const r = await fetch(FUNCAO, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: CHAVE },
+          body: JSON.stringify({ token }),
+        });
+        const d = await r.json();
+        if (!r.ok) { el.innerHTML = `<div class="msg">${rlEsc(d.erro || 'Não foi possível abrir.')}</div>`; return; }
+        document.title = `Histórico de saúde — ${d.pessoa?.nome || ''}`;
+        el.innerHTML = renderRelatorioHTML(d).replace('</div></div>', `</div>
+          <div class="rel-sub">Link válido até ${rlData(d.expira_em)}.</div></div>
+          <div class="acoes"><button id="baixar">Baixar PDF</button><button class="sec" onclick="print()">Imprimir</button></div>`);
+        document.getElementById('baixar').onclick = async (ev) => {
+          const b = ev.target; b.disabled = true; b.textContent = 'Gerando…';
+          try {
+            const blob = await gerarRelatorioPDF(d);
+            await compartilharPDF(blob, `Historico-${(d.pessoa?.nome || 'paciente').replace(/\s+/g, '-')}.pdf`);
+          } catch (e) { alert(e.message); }
+          b.disabled = false; b.textContent = 'Baixar PDF';
+        };
+      } catch (e) {
+        el.innerHTML = '<div class="msg">Não foi possível carregar. Verifique a internet e tente de novo.</div>';
+      }
+    })();
+  </script>
+</body>
+</html>

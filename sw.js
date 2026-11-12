@@ -1,6 +1,6 @@
 // Service worker: recebe as notificações e guarda os arquivos do app para abrir rápido
-const CACHE = 'remedios-v4';
-const ARQUIVOS = ['./', './index.html', './estilo.css', './app.js', './remedios-base.js', './manifest.json', './icones/icone-192.png'];
+const CACHE = 'remedios-v5';
+const ARQUIVOS = ['./', './index.html', './estilo.css', './app.js', './remedios-base.js', './relatorio-comum.js', './saude.js', './manifest.json', './icones/icone-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARQUIVOS)).then(() => self.skipWaiting()));
@@ -47,13 +47,15 @@ self.addEventListener('push', (e) => {
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = new URL(e.notification.data?.url || './', self.registration.scope).href;
-  const dose = new URL(url).searchParams.get('dose');
+  const ps = new URL(url).searchParams;
+  const dose = ps.get('dose'), consulta = ps.get('consulta');
   e.waitUntil((async () => {
     const janelas = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const j of janelas) {
       if (j.url.startsWith(self.registration.scope)) {
         await j.focus();
         if (dose) j.postMessage({ dose });
+        if (consulta) j.postMessage({ consulta });
         return;
       }
     }

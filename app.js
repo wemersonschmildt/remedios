@@ -253,7 +253,17 @@ async function garantirRemedio(nome) {
   });
 }
 
-// Alertas de mesmo princípio ativo ou de dois anti-inflamatórios próximos
+// Confere se o remédio aparece nas alergias da ficha
+function alergiaConflito(pessoaId, nome) {
+  const al = norm(S.pessoas.find((p) => p.id === pessoaId)?.alergias);
+  if (!al) return null;
+  const r = acharRemedio(nome);
+  const termos = [nome, ...(r ? r.principios : [])].map(norm).filter((t) => t.length >= 4);
+  const achado = termos.find((t) => al.includes(t));
+  return achado ? `🚨 <strong>ALERGIA:</strong> a ficha registra alergia a "${esc(S.pessoas.find((p) => p.id === pessoaId).alergias)}" e ${esc(nome)} contém <strong>${esc(achado)}</strong>.` : null;
+}
+
+// Alertas de alergia, mesmo princípio ativo ou de dois anti-inflamatórios próximos
 async function verificarAlertas(pessoaId, nome, quandoIso) {
   const quando = new Date(quandoIso).getTime();
   const r = acharRemedio(nome);
@@ -266,6 +276,8 @@ async function verificarAlertas(pessoaId, nome, quandoIso) {
     .lte('tomado_em', new Date(quando).toISOString())
     .order('tomado_em', { ascending: false }));
   const avisos = [];
+  const alergia = alergiaConflito(pessoaId, nome);
+  if (alergia) avisos.push(alergia);
   const vistos = new Set();
   for (const d of doses) {
     const o = acharRemedio(d.remedio);
@@ -406,7 +418,8 @@ function telaBoasVindas(soPessoas = false) {
 const ABAS = [
   { id: 'hoje', rotulo: 'Hoje', icone: '🏠' },
   { id: 'historico', rotulo: 'Histórico', icone: '📋' },
-  { id: 'tratamentos', rotulo: 'Tratamentos', icone: '💊' },
+  { id: 'tratamentos', rotulo: 'Remédios', icone: '💊' },
+  { id: 'saude', rotulo: 'Saúde', icone: '🩺' },
   { id: 'ajustes', rotulo: 'Ajustes', icone: '⚙️' },
 ];
 
@@ -443,10 +456,10 @@ async function render() {
   const token = Symbol();
   renderizando = token;
   try {
-    const html = await ({ hoje: htmlHoje, historico: htmlHistorico, tratamentos: htmlTratamentos, ajustes: htmlAjustes })[S.aba]();
+    const html = await ({ hoje: htmlHoje, historico: htmlHistorico, tratamentos: htmlTratamentos, saude: htmlSaude, ajustes: htmlAjustes })[S.aba]();
     if (renderizando !== token) return;
     $('#conteudo').innerHTML = html;
-    ({ hoje: ligarHoje, historico: ligarHistorico, tratamentos: ligarTratamentos, ajustes: ligarAjustes })[S.aba]();
+    ({ hoje: ligarHoje, historico: ligarHistorico, tratamentos: ligarTratamentos, saude: ligarSaude, ajustes: ligarAjustes })[S.aba]();
   } catch (e) { erro(e); }
 }
 
@@ -474,6 +487,7 @@ async function htmlHoje() {
   const proximas = pendentes.filter((d) => new Date(d.previsto_em) > limite).slice(0, 8);
 
   let html = avisoInstalacao();
+  html += await htmlConsultasHoje(p);
 
   if (paraAgora.length) {
     html += `<div class="secao-titulo">Para dar agora</div>`;
@@ -587,6 +601,8 @@ async function darSos(id, quando = new Date().toISOString(), confirmarAntes = tr
     const tomadas = await q(sb.from('doses').select('remedio, tomado_em').eq('pessoa_id', t.pessoa_id).eq('status', 'tomada')
       .gte('tomado_em', new Date(new Date(quando) - Math.max(24, t.intervalo_horas) * HORA).toISOString()));
     const st = situacaoSos(t, tomadas, new Date(quando).getTime() + 1);
+    const alergia = alergiaConflito(t.pessoa_id, t.remedio);
+    if (alergia && !(await confirmar('Atenção', `<div class="aviso" style="margin-top:0">${alergia}</div>`, 'Registrar mesmo assim'))) return;
     if (confirmarAntes && !st.liberado) {
       const motivo = st.limite
         ? `Já foram ${st.em24h} dose(s) nas últimas 24h (máximo ${t.max_doses_dia}).`
@@ -620,6 +636,7 @@ function ligarHoje() {
   });
   $$('[data-outro]').forEach((b) => b.onclick = () => abrirDose(b.dataset.outro));
   $('#btn-avulso').onclick = () => modalAvulso();
+  $$('[data-consulta-hoje]').forEach((el) => el.onclick = () => abrirConsulta(el.dataset.consultaHoje));
   $$('[data-sos]').forEach((b) => b.onclick = () => darSos(b.dataset.sos));
   $$('[data-sos-outro]').forEach((b) => b.onclick = () => {
     const t = cacheHoje.sos.find((x) => x.id === b.dataset.sosOutro);
@@ -796,9 +813,10 @@ async function htmlHistorico() {
   const inicio = new Date();
   inicio.setHours(0, 0, 0, 0);
   inicio.setDate(inicio.getDate() - (S.diasHistorico - 1));
-  const [doses, eventos] = await Promise.all([
+  const [doses, eventos, atends] = await Promise.all([
     q(sb.from('doses').select('*').eq('pessoa_id', p.id).eq('status', 'tomada').gte('tomado_em', inicio.toISOString()).order('tomado_em')),
     q(sb.from('eventos').select('*').eq('pessoa_id', p.id).gte('ocorrido_em', inicio.toISOString()).order('ocorrido_em')),
+    q(sb.from('atendimentos').select('id, tipo, data_hora, especialidade').eq('pessoa_id', p.id).gte('data_hora', inicio.toISOString()).order('data_hora')),
   ]);
 
   // Agrupa por dia e, dentro do dia, por remédio / acontecimento
@@ -812,6 +830,7 @@ async function htmlHistorico() {
   };
   for (const d of doses) add(d.tomado_em, d.remedio, { tipo: 'dose', quando: d.tomado_em, reg: d });
   for (const e of eventos) add(e.ocorrido_em, e.tipo, { tipo: 'evento', quando: e.ocorrido_em, reg: e });
+  for (const a of atends) add(a.data_hora, a.tipo, { tipo: 'atendimento', quando: a.data_hora, reg: a });
   const chaves = [...dias.keys()].sort().reverse();
   cacheHist = { pessoa: p, dias: chaves.map((k) => ({ chave: k, grupos: [...dias.get(k).entries()].map(([nome, itens]) => ({ nome, itens: itens.sort((a, b) => new Date(a.quando) - new Date(b.quando)) })).sort((a, b) => new Date(a.itens[0].quando) - new Date(b.itens[0].quando)) })) };
 
@@ -826,12 +845,13 @@ async function htmlHistorico() {
     html += `<div class="secao-titulo">${esc(rotuloDia(dia.chave))}</div><div class="cartao dia">`;
     for (const g of dia.grupos) {
       const ehEvento = g.itens[0].tipo === 'evento';
+      const ehAtend = g.itens[0].tipo === 'atendimento';
       const t = TIPOS_EVENTO.find((x) => x.tipo === g.nome);
-      html += `<div class="linha-hist"><div class="nome">${ehEvento ? (t?.icone || '•') + ' ' : ''}${esc(g.nome)}</div><div class="horarios">`;
+      html += `<div class="linha-hist"><div class="nome">${ehEvento ? (t?.icone || '•') + ' ' : ehAtend ? (ICONE_ATENDIMENTO[g.nome] || '🩺') + ' ' : ''}${esc(g.nome)}</div><div class="horarios">`;
       for (const it of g.itens) {
         regs.push(it);
         const extra = it.tipo === 'evento' && it.reg.valor ? ` · ${esc(it.reg.valor)}${t?.campo?.sufixo || ''}` : '';
-        html += `<button class="hora-chip ${ehEvento ? 'evento' : ''}" data-reg="${idx++}">${hora(it.quando)}${extra}</button>`;
+        html += `<button class="hora-chip ${ehEvento ? 'evento' : ehAtend ? 'atend' : ''}" data-reg="${idx++}">${hora(it.quando)}${extra}</button>`;
       }
       html += `</div></div>`;
     }
@@ -859,6 +879,7 @@ function textoHistorico() {
 function ligarHistorico() {
   $$('[data-reg]').forEach((b) => b.onclick = () => {
     const it = cacheHist.regs[+b.dataset.reg];
+    if (it.tipo === 'atendimento') return abrirAtendimento(it.reg.id);
     it.tipo === 'dose' ? editarDoseTomada(it.reg) : editarEvento(it.reg);
   });
   $('#h-mais').onclick = () => { S.diasHistorico += 7; render(); };
@@ -1259,6 +1280,8 @@ function modalTratamento(nomeInicial = '', tipoInicial = 'agendado') {
         if (!(await garantirRemedio(nome))) return;
         const nomeFinal = acharRemedio(nome)?.nome || nome;
         if (tipo === 'sos') {
+          const alergia = alergiaConflito(p.id, nomeFinal);
+          if (alergia && !(await confirmar('Atenção', `<div class="aviso" style="margin-top:0">${alergia}</div>`, 'Cadastrar mesmo assim'))) return;
           await q(sb.from('tratamentos').insert({
             familia_id: S.familia.id, pessoa_id: p.id, remedio: nomeFinal, dose: dados.dose,
             intervalo_horas: int, dias: null, inicio: new Date().toISOString(), tipo: 'sos',
@@ -1458,11 +1481,11 @@ async function sincronizarInscricaoPush() {
 }
 
 function abrirDoseDaUrl() {
-  const id = new URLSearchParams(location.search).get('dose');
-  if (id) {
-    history.replaceState(null, '', location.pathname);
-    abrirDose(id);
-  }
+  const ps = new URLSearchParams(location.search);
+  const id = ps.get('dose'), consulta = ps.get('consulta');
+  if (id || consulta) history.replaceState(null, '', location.pathname);
+  if (id) abrirDose(id);
+  else if (consulta) abrirConsulta(consulta);
 }
 
 // ============================================================
@@ -1472,6 +1495,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(console.warn);
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.dose && S.usuario) abrirDose(e.data.dose);
+    if (e.data?.consulta && S.usuario) abrirConsulta(e.data.consulta);
   });
 }
 
